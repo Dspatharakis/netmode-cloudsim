@@ -43,10 +43,10 @@ public class JournalSim {
     // n-MMC related constants
     private static final Boolean CREATE_NMMC_TRANSITION_MATRIX = false;
     private static final int NMMC_HISTORY = 2;
-    private static final String SIM_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/leivaDatas.csv";
-    private static final String READ_NMMC_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/transitionMatrix(2history12000intervals).csv";
-    private static final String WRITE_NMMC_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/transitionMatrix.csv";
-    private static final String WRITE_INTERVALS_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/intervalStats.csv";
+    private static final String SIM_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/leivaDatas.csv";
+    private static final String READ_NMMC_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/transitionMatrix(2history12000intervals).csv";
+    private static final String WRITE_NMMC_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/transitionMatrix.csv";
+    private static final String WRITE_INTERVALS_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/intervalStats.csv";
 
     // Environment related constants
     private static final int POI = 9; //define points of interest
@@ -94,6 +94,34 @@ public class JournalSim {
     private ArrayList<Integer> prevPos;
     private double[][] requestRatePerCell;
     private Boolean firstEvent;
+
+    //TODO ds initilizations
+    //Algorithm settings
+    private double D=1000000000;
+    private double d= 0.11;                            // parameter for |D|<d
+    private double e= 0.1;                            // e parameter for accuracy parameter
+    private double u= 0.1;                             // theta parameter for accuracy
+    //default structure of cloudsimplus
+    private double [] Ti = new double [POI];
+    private int[] OverloadedCloudlets = new int[POI];
+    private int[] UnderloadedCloudlets = new int[POI];
+    private double [] fi = new double [POI];
+    private double [] fj = new double [POI];
+    private double[] lj = new double[POI];  // synolikh roh poy mpenei se kathe underloaded
+    private double[] li = new double[POI];
+    //private double[] ArrivalRate = new double[POI];
+    private double Dtotal;
+    private double[][] AverageResponseTimeTi = new double[POI][4000]; // HTAN 80
+    private static double[][] NetDelay ={{0.000000,0.174351,0.151792,0.102222,0.121226,0.167159,0.136996,0.151449,0.137782},
+            {0.174351,0.000000,0.104213,0.118699,0.187412,0.197028,0.168254,0.144612,0.177855},
+            {0.151792,0.104213,0.000000,0.182387,0.133270,0.132010,0.192918,0.146808,0.122887},
+            {0.102222,0.118699,0.182387,0.000000,0.189572,0.102149,0.114024,0.154943,0.114506},
+            {0.121226,0.187412,0.133270,0.189572,0.000000,0.136235,0.108649,0.182796,0.126507},
+            {0.167159,0.197028,0.132010,0.102149,0.136235,0.000000,0.167916,0.115575,0.131254},
+            {0.136996,0.168254,0.192918,0.114024,0.108649,0.167916,0.000000,0.191353,0.105500},
+            {0.151449,0.144612,0.146808,0.154943,0.182796,0.115575,0.191353,0.000000,0.174703},
+            {0.137782,0.177855,0.122887,0.114506,0.126507,0.131254,0.105500,0.174703,0.000000}};
+    private double[] ArrivalRate = {2,4.5,2.6,1.4,2.8,5.2,4.5,7.6,1.4};
 
     public static void main(String[] args) {
         new JournalSim();
@@ -150,14 +178,70 @@ public class JournalSim {
 //            });
         }
 
+        //TODO ds define number of servers and serviceRate per server according to static placement
+        //TODO ds perform static placement of vms and hosts for POI 9 -> 18
+        double[] ServiceRate = {4.75,2.49,3.48,5.71,4.05,6.75,3.49,3.48,15.71};
+        double[] NumberofServers = {2,4,3,4,5,4,5,4,3};
+        for (int i = 0; i < POI; i++) {
+            for (int j=0; (j < 4000); j++)                      //htan 80
+                CalculationofAverageResponseTime( (double)j/100, ServiceRate[i], (int)NumberofServers[i], i);
+        }
+        Algorithm1(ServiceRate,NumberofServers);
+        //TODO ds calculate offline averageResponseTime
+        //TODO ds after the estimation of workload load balance it between cloudlets
+        //TODO ds call for each time the algorithm per app! feed the algorithm with the placement for each app and the workload for each app
+
+
 //        runSimulationAndPrintResults();
         int[][] flavorCores = {{1, 2, 4}, {1, 2, 4}};
-        ArrayList<int[][]> feasibleFormations = calculateFeasibleServerFormations(4, flavorCores);
-        double[][] guaranteedWorkload = calculateServerGuaranteedWorkload(feasibleFormations);
-        double[] energyConsumption = calculateServerPowerConsumption(feasibleFormations, EDGE_HOST_PES);
-        double[][] predictedWorkload = {{50, 100}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}};
-        ArrayList<Integer>[] vmPlacement = optimizeVmPlacement(guaranteedWorkload, energyConsumption, 3, predictedWorkload);
-        calculateResidualWorkload(vmPlacement, guaranteedWorkload, predictedWorkload);
+        //ArrayList<int[][]> feasibleFormations = calculateFeasibleServerFormations(4, flavorCores);
+        //double[][] guaranteedWorkload = calculateServerGuaranteedWorkload(feasibleFormations);
+        //double[] energyConsumption = calculateServerPowerConsumption(feasibleFormations, EDGE_HOST_PES);
+        //double[][] predictedWorkload = {{50, 100}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}};
+        //ArrayList<Integer>[] vmPlacement = optimizeVmPlacement(guaranteedWorkload, energyConsumption, 3, predictedWorkload);
+        ArrayList<Integer>[] vmPlacement = new ArrayList[POI];
+        vmPlacement[0] = new ArrayList<>() ;
+        vmPlacement[1] = new ArrayList<>() ;
+        vmPlacement[2] = new ArrayList<>() ;
+        vmPlacement[3] = new ArrayList<>() ;
+        vmPlacement[4] = new ArrayList<>() ;
+        vmPlacement[5] = new ArrayList<>() ;
+        vmPlacement[6] = new ArrayList<>() ;
+        vmPlacement[7] = new ArrayList<>() ;
+        vmPlacement[8] = new ArrayList<>() ;
+        vmPlacement[0].add(0);
+        vmPlacement[0].add(5);
+        vmPlacement[1].add(6);
+        vmPlacement[1].add(11);
+        vmPlacement[1].add(11);
+        vmPlacement[2].add(6);
+        vmPlacement[2].add(11);
+        vmPlacement[2].add(11);
+        vmPlacement[3].add(6);
+        vmPlacement[3].add(11);
+        vmPlacement[3].add(11);
+        vmPlacement[4].add(6);
+        vmPlacement[4].add(11);
+        vmPlacement[4].add(11);
+        vmPlacement[5].add(6);
+        vmPlacement[5].add(11);
+        vmPlacement[5].add(11);
+        vmPlacement[6].add(6);
+        vmPlacement[6].add(11);
+        vmPlacement[6].add(11);
+        vmPlacement[7].add(6);
+        vmPlacement[7].add(11);
+        vmPlacement[7].add(11);
+        vmPlacement[8].add(6);
+        vmPlacement[8].add(11);
+        vmPlacement[8].add(11);
+
+
+        //TODO ds vmplacement static apo emena! guaranteed bgainei apo to service rate tou placement kai predicted apo mario
+        //double [][] work = calculateResidualWorkload(vmPlacement, guaranteedWorkload, predictedWorkload);
+        //System.out.println("skata "+work[0][0]);
+
+
 
         System.out.println(getClass().getSimpleName() + " finished!");
         if (CREATE_NMMC_TRANSITION_MATRIX) createNMMCTransitionMatrixCSV();
@@ -213,7 +297,7 @@ public class JournalSim {
             // Create requests based on generated request rate
             int app = 0; // TODO: create workload for more than one apps
             if (!CREATE_NMMC_TRANSITION_MATRIX) generateRequests(requestRatePerCell, evt, app);
-
+            //TODO ds load balancing before that!
             lastAccessed = (int) evt.getTime();
         }
     }
@@ -927,7 +1011,6 @@ public class JournalSim {
         } catch (IOException e) {
             e.printStackTrace();
         }
-
         simulation.terminateAt(TIME_TO_TERMINATE_SIMULATION);
         simulation.addOnClockTickListener(this::masterOfPuppets);
         simulation.start();
@@ -937,4 +1020,239 @@ public class JournalSim {
         }
         if (!CREATE_NMMC_TRANSITION_MATRIX) new CloudletsTableBuilder(tasks).build();
     }
+
+
+
+    private void CalculationofAverageResponseTime(double li, double mi, int ni, int indexofhost) {
+        int j = (int) (100*li);
+        if (j < 0 || mi <= 0 || ni <= 0)
+            throw new IllegalArgumentException("The parameters cannot be negative!");
+        if (li==0) {
+            AverageResponseTimeTi[indexofhost][(int)j] =0;
+        }
+        else
+        if (li<ni*mi-0.25) {
+            ErlangC d=new ErlangC(li,mi,ni);
+            double waitProb = d.getProbDelay(li,mi,ni);
+            double waitTime = d.getAverageWaitTime(li,mi,ni);
+            AverageResponseTimeTi[indexofhost][(int) j] = waitTime;
+            //System.out.println(waitProb);
+            //System.out.println(waitTime);
+        }
+        else {
+            li = ni*mi-0.25;
+            ErlangC d = new ErlangC(li, mi, ni);
+            double waitTime = d.getAverageWaitTime(li, mi, ni);
+            AverageResponseTimeTi[indexofhost][(int) j] = waitTime;
+        }
+
+    }
+
+
+    public void Algorithm1(double [] ServiceRate, double [] NumberofServers) {
+        // TODO should read arrivalrate from predicted workload for each cite!
+
+        long thisTime = System.currentTimeMillis();
+        double D = 1000000000;
+        double Tmax = -2;
+        double Tmin = 100;
+        double [] Tbefore= new double [POI];
+        for (int i = 0; i < POI; i++) {
+            lj[i]=0;
+            li[i]=0;
+            int arrivalrate = (int) (100 * ArrivalRate[i]);
+            Ti[i] = AverageResponseTimeTi[i][arrivalrate];
+            Tbefore[i]=Ti[i];
+            if (Tmax < Ti[i]) Tmax = Ti[i];
+            if (Tmin > Ti[i]) Tmin = Ti[i];
+            //System.out.println("Ti "+ Ti[i] + " Host: "+ i + " ArrivalRate: " + ArrivalRate[i] + " Tmax: " + Tmax + " Tmin " + Tmin);
+        }
+        int counterbreak=0;
+        while ((D > d) || (D < -d) ) {
+            int pointerOver = 0;
+            int pointerUnder = 0;
+            Dtotal = (Tmax + Tmin) / 2;
+            //        Log.printFormatted("\t Dtotal : %f     \n",               Dtotal            );
+            for (int i = 0; i < POI; i++) {
+                fi[i] = 0;
+                fj[i] = 0;
+                if (AverageResponseTimeTi[i][(int) (100 * ArrivalRate[i])] > Dtotal) {
+                    OverloadedCloudlets[pointerOver] = i;
+                    pointerOver++;
+                } else {
+                    UnderloadedCloudlets[pointerUnder] = i;
+                    pointerUnder++;
+                }
+            }
+            //System.out.println("PointOver: "+ pointerOver + " PointUnder" + pointerUnder);
+            double art = 0;
+            double sumfi = 0;
+            double sumfj = 0;
+            for (int i = 0; i < pointerOver; i++) {
+                int temp2 = OverloadedCloudlets[i];
+                for (int j = ((int) (100 * ArrivalRate[temp2])); j >100 ; j--) {
+                    art = AverageResponseTimeTi[temp2][j];
+                    if ((art <= Dtotal * (1 + e)) && (art >= Dtotal * (1 - e))) {
+                        fi[i] = +ArrivalRate[temp2] - (double) j / 100;
+                    }
+                    if (((double) j / 100) > (ServiceRate[temp2] * NumberofServers[temp2] - 0.25))
+                        j = 000;
+
+                }
+                int j=(int)( ArrivalRate[temp2]*100);
+                sumfi = sumfi + fi[i];
+            }
+
+            for (int i = 0; i < pointerUnder; i++) {
+
+                int temp1 = UnderloadedCloudlets[i];
+                for (int j = (int) (100 * ArrivalRate[temp1]); j < 4000; j++) {
+                    art = AverageResponseTimeTi[temp1][j];
+                    if ((art <= Dtotal * (1 + e)) && (art>=Dtotal*(1-e))){
+                        //if ((art<=Dtotal+e)&&(art>=Dtotal-e)){
+                        fj[i] = -ArrivalRate[temp1] + (double) j / 100;
+                    }
+                    if (((double) j / 100) > (ServiceRate[temp1] * NumberofServers[temp1] - 0.25))
+                        j = 4000;
+                }
+                sumfj = sumfj + fj[i];
+            }
+            D = sumfi - sumfj;
+            if (D > 0) Tmin = Dtotal;
+            if (D < 0) Tmax = Dtotal;
+            //       Log.printFormatted("\t D : %f  Dtotal %f  Tmin %f Tmax %f  \n",D, Dtotal, Tmin, Tmax);
+            //System.out.println("D: " + Dtotal + " Tmin:  " + Tmin + " Tmax:  " + Tmax);
+            if (Math.abs(Tmin-Tmax)<0.0000001) counterbreak++;
+            //if (counterbreak>10) {
+            //    //Log.printFormatted("\t BREAK ! counterbreak: %d   \n\n",counterbreak);
+            //    break;
+            //}
+        }
+
+        // find overloaded and underloaded cloudlets
+        int pointerOver = 0;
+        int pointerUnder = 0;
+        counterbreak=0;
+        int notadjust =0;
+        for (int i = 0; i < POI; i++) {
+            if (Ti[i] > Dtotal) {
+                OverloadedCloudlets[pointerOver] = i;
+                pointerOver++;
+            } else {
+                UnderloadedCloudlets[pointerUnder] = i;
+                pointerUnder++;
+            }
+        }
+
+        // +2 for s,t nodes. 0 to all nodes!!
+        double[][] graph = new double[POI + 2][POI + 2];
+        for (int i = 0; i < POI + 2; i++)  // Vs = OverloadedCloudlets.get[i];
+            for (int j = 0; j < POI + 2; j++)
+                graph[i][j] = 0;
+
+        double Daverage = 100000000;
+        while (((Dtotal - Daverage) > u) || (Dtotal - Daverage < -u)) {
+            //         Log.printFormatted("\t PointOver %d  PointUnder %d\n",pointerOver, pointerUnder);
+            for (int i = 0; i < POI ; i++) {
+                lj[i] = 0;
+                li[i] = 0;
+            }
+
+            double art = 0;
+            for (int i = 0; i < pointerOver; i++) { // Vs = OverloadedCloudlets.get[i];
+                int temp2 = OverloadedCloudlets[i];
+                //    for (int j = 100; j < (int) (100 * ArrivalRate[temp2]); j++) {
+                for (int j = (int) (100 * ArrivalRate[temp2]); j > 100 ; j--) {
+                    art = AverageResponseTimeTi[temp2][j];
+                    if ((art <= Dtotal * (1 + e)) && (art >= Dtotal * (1 - e))) {
+                        //if ((art<=Dtotal+e)&&(art>=Dtotal-e)){
+                        fi[i] = +ArrivalRate[temp2] - (double) j / 100;
+                        //        Log.printFormatted("\t Host %d art : %f     Flow Over: %f   \n",temp2, art, fi[i]);
+                    }
+                    if (((double) j / 100) > (ServiceRate[temp2] * NumberofServers[temp2] - 0.25)) j = 0;
+                    if (fi[i] < 0) fi[i] = 0;
+                }
+                graph[0][1+ i] = fi[i];
+            }
+
+            for (int i = 0; i < pointerUnder; i++) {
+                int temp1 = UnderloadedCloudlets[i];
+                for (int j = (int) (100 * ArrivalRate[temp1]); j < 4000; j++) {
+                    art = AverageResponseTimeTi[temp1][j];
+                    if ((art <= Dtotal * (1 + e)) && (art>=Dtotal*(1-e))){
+                        //if ((art<=Dtotal+e)&&(art>=Dtotal-e)){
+                        fj[i] = -ArrivalRate[temp1] + (double) j / 100;
+                        //               Log.printFormatted("\t Host %d art : %f     Flow Under: %f \n",temp1, art, fj[i]);
+                    }
+                    if (((double) j / 100 )> (ServiceRate[temp1] * NumberofServers[temp1] - 0.25))
+                        j = 4000;
+                    if (fj[i] < 0) fj[i] = 0;
+                }
+                graph[POI - pointerUnder + 1 + i][POI + 1] = fj[i];
+            }
+
+            for (int i = 0; i < pointerOver; i++) { // Vs = OverloadedCloudlets.get[i];
+                for (int j = 0; j < pointerUnder; j++) {
+                    int temp1 = UnderloadedCloudlets[j];
+                    int temp2 = OverloadedCloudlets[i];
+                    graph[1 + i][POI - pointerUnder + 1 + j] = Math.min(graph[0][1 + i], graph[POI - pointerUnder + 1 + j][POI + 1]);
+                }
+            }
+            // MIN MAX FLOW WITH (Dtotal,Vs,Vt,e)
+            double[][] skata = new double[POI + 2][POI + 2];
+            skata = MinCostMaxFlow.main(graph,NetDelay,POI+2);
+            //skata = FordFulkerson.main(graph, POI + 2);
+            double[] Dj = new double[POI];
+            double maxDj = -20000;
+            for (int i = 0; i < pointerUnder; i++) {
+                int temp1 = UnderloadedCloudlets[i];
+                lj[i] = ArrivalRate[temp1];
+                double sumFi = 0;
+                double Tnet = 0;
+                for (int k = 0; k < pointerOver; k++) {    // k=1=s korifi mexri pointover dhladi ola ta overloaded gia to sugkekrimeno i = underloaded
+                    sumFi = sumFi + skata[POI - pointerUnder +1+ i][k+1];  // eiserxomeni roh
+                    li[k]=li[k] + skata[POI - pointerUnder +1+ i][k+1] ;
+                    Tnet = Tnet + Math.max(0, skata[k+1][POI - pointerUnder + 1 + i]) * NetDelay[temp1][k];
+                }
+                lj[i] = lj[i] + sumFi;
+                 //         Log.printFormatted("\t li: %f  lj : %f  sumFi: %f ArrivalRate: %f      \n",li[0], lj[i], sumFi, ArrivalRate[temp1]);
+                Dj[i] = AverageResponseTimeTi[temp1][(int) (lj[i]*100)] + Tnet;  //htan 10
+                if (Dj[i] > maxDj) maxDj = Dj[i];
+            }
+            Daverage = maxDj;
+            Dtotal = (Dtotal + Daverage) / 2;
+            counterbreak++;
+            if (counterbreak>20) {
+                System.out.println("\t BREAK2 ! counterbreak:" + counterbreak);
+                notadjust=1;
+                break;
+            }
+        }
+        System.out.println(pointerOver);
+        System.out.println(pointerUnder);
+        // overloaded cloudlets apo host 0 mexri pointover
+        // underloaded cloudlets apo host overloaded+1 mexri HOSTS
+        if (notadjust==0) {
+            for (int i = 0; i < pointerOver; i++) {
+                int temp2 = OverloadedCloudlets[i];
+                System.out.println("\t Host :" +temp2 + "  PREVIOUS ArrivalRate: " + ArrivalRate[temp2]);
+                ArrivalRate[temp2] = ArrivalRate[temp2] - li[i];
+                if (ArrivalRate[temp2] < 0.1) ArrivalRate[temp2] = 0.1;
+                System.out.println("\t Host :" +temp2 + "  Next ArrivalRate: " + ArrivalRate[temp2]);
+            }
+            for (int i = 0; i < pointerUnder; i++) {
+                int temp1 = UnderloadedCloudlets[i];
+                System.out.println("\t Host :" +temp1 + "  PREVIOUS ArrivalRate: " + ArrivalRate[temp1]);
+                ArrivalRate[temp1] = lj[i];
+                if (ArrivalRate[temp1] < 0.1) ArrivalRate[temp1] = 0.1;
+                System.out.println("\t Host :" +temp1 + "  Next ArrivalRate: " + ArrivalRate[temp1]);
+            }
+        }
+
+        long endTimee   = System.currentTimeMillis();
+        long totalTimee = endTimee - thisTime;
+        System.out.println(totalTimee);   // in milliseconds
+        //TODO ds should return arrivalRate per cite
+    }
+
 }
