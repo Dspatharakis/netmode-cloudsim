@@ -1,6 +1,5 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import javafx.util.Pair;
 import lpsolve.LpSolveException;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.math3.distribution.PoissonDistribution;
@@ -24,16 +23,13 @@ import org.cloudbus.cloudsim.vms.VmSimple;
 import org.cloudsimplus.builders.tables.CloudletsTableBuilder;
 import org.cloudsimplus.listeners.EventInfo;
 
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.text.DecimalFormat;
 import java.util.*;
 import java.util.stream.IntStream;
 
 public class JournalSim {
     // TODO: read these values from external file
     // TODO: set debugging toggle and different colors
+    // TODO: do not use constants in methods; add them to method call
 
     // Simulation related constants
     private static final double TIME_TO_TERMINATE_SIMULATION = 360;
@@ -43,17 +39,20 @@ public class JournalSim {
     // n-MMC related constants
     private static final Boolean CREATE_NMMC_TRANSITION_MATRIX = false;
     private static final int NMMC_HISTORY = 2;
+
     private static final String SIM_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/leivaDatas.csv";
     private static final String READ_NMMC_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/transitionMatrix(2history12000intervals).csv";
     private static final String WRITE_NMMC_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/transitionMatrix.csv";
     private static final String WRITE_INTERVALS_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/intervalStats.csv";
 
+
     // Environment related constants
     private static final int POI = 9; //define points of interest
     private static final int APPS = 2;
+    private static final int GROUPS = 9;
     private static final int NO_OF_DISTANCES = 1;
     private static final int MAX_USERS_PER_CELL = 2;
-    private static final int GROUP_SIZE = 4; // [1..10]
+    private static final int GROUP_SIZE = 8; // [1..10]
     private static final int GRID_SIZE = 3;
 
     // Edge Servers related constants
@@ -76,9 +75,7 @@ public class JournalSim {
     private static final int TASK_LENGTH = 1000;
 
     // Various "global" variables
-    private int[][] alreadyAccessed; // 1 = been there, 0 = not been there
     private Double[][] simData;
-    private int howManyVisited;
     private int lastAccessed;
     private int maxVmSize;
     private final CloudSim simulation = new CloudSim();
@@ -91,9 +88,10 @@ public class JournalSim {
     private HashMap<String, int[]> transitionsLog;
     private HashMap<String, double[]> transitionProbabilitiesMap;
     private String historicState;
-    private ArrayList<Integer> prevPos;
     private double[][] requestRatePerCell;
     private Boolean firstEvent;
+    private CSVmachine csvm;
+    private Group[] groups;
 
     //TODO ds initilizations
     //Algorithm settings
@@ -128,19 +126,28 @@ public class JournalSim {
     }
 
     public JournalSim() {
-        alreadyAccessed = new int[GRID_SIZE][GRID_SIZE];
+        csvm = new CSVmachine(POI, APPS, SAMPLING_INTERVAL);
+
+        groups = new Group[GROUPS];
         edgeBroker = new DatacenterBrokerSimpleExtended[POI];
         vmList = (ArrayList<Vm>[][]) new ArrayList[POI][APPS];
         taskList = (ArrayList<TaskSimple>[][]) new ArrayList[POI][APPS];
         taskCounter = new int[POI][APPS];
-        prevPos = new ArrayList<>(Arrays.asList(0, 0));
 
-        simData = readSimCSVData(SIM_CSV_FILE_LOCATION);
-        howManyVisited = 1;
+        simData = csvm.readSimCSVData();
         firstEvent = true;
         historicState = "";
 
-        // One broker and one datacenter per Point of Interest
+        // Create groups with random starting position
+        for (int group = 0; group < GROUPS; group++) {
+            Random rand = new Random();
+            int size = rand.nextInt(GROUP_SIZE);
+            int app = rand.nextInt(APPS);
+            Coordinates currPos = new Coordinates(rand.nextInt(GRID_SIZE), rand.nextInt(GRID_SIZE));
+            groups[group] = new Group(group, size, app, currPos, GRID_SIZE);
+        }
+
+        // Add one broker and one datacenter per Point of Interest
         for (int poi = 0; poi < POI; poi++) {
             Set<Datacenter> edgeDCList = new HashSet<>();
             Datacenter dc = createDatacenter(EDGE_HOSTS, EDGE_HOST_PES, EDGE_HOST_PE_MIPS, EDGE_HOST_RAM, EDGE_HOST_BW);
@@ -171,12 +178,13 @@ public class JournalSim {
         transitionsLog = new HashMap<>();
         // TODO: use transition probabilities map to predict incoming workload
         if (!CREATE_NMMC_TRANSITION_MATRIX) {
-            transitionProbabilitiesMap = readNMMCTransitionMatrixCSV();
+            transitionProbabilitiesMap = csvm.readNMMCTransitionMatrixCSV();
 //            System.out.println("Transition Probabilities Map: ");
 //            transitionProbabilitiesMap.entrySet().forEach(entry -> {
 //                System.out.println(entry.getKey() + " -> " + Arrays.toString(entry.getValue()));
 //            });
         }
+
 
         //TODO ds define number of servers and serviceRate per server according to static placement
         //TODO ds perform static placement of vms and hosts for POI 9 -> 18
@@ -242,9 +250,21 @@ public class JournalSim {
         //System.out.println("skata "+work[0][0]);
 
 
+        runSimulationAndPrintResults();
+//        int[][] flavorCores = {{1, 2, 4}, {1, 2, 4}};
+//        ArrayList<int[][]> feasibleFormations = calculateFeasibleServerFormations(4, flavorCores);
+//        double[][] guaranteedWorkload = calculateServerGuaranteedWorkload(feasibleFormations);
+//        double[] energyConsumption = calculateServerPowerConsumption(feasibleFormations, EDGE_HOST_PES);
+//        double[][] predictedWorkload = {{50, 100}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400}, {200, 400},
+//                {200, 400}, {200, 400}};
+//        ArrayList<Integer>[] vmPlacement = optimizeVmPlacement(feasibleFormations, guaranteedWorkload, energyConsumption,
+//                3, predictedWorkload, 4, 0.5);
+//        calculateResidualWorkload(vmPlacement, guaranteedWorkload, predictedWorkload);
+//        calculateResidualResources(vmPlacement, 3);
+
 
         System.out.println(getClass().getSimpleName() + " finished!");
-        if (CREATE_NMMC_TRANSITION_MATRIX) createNMMCTransitionMatrixCSV();
+        if (CREATE_NMMC_TRANSITION_MATRIX) csvm.createNMMCTransitionMatrixCSV(transitionsLog);
     }
 
     // Take decisions with a second-wise granularity
@@ -259,25 +279,23 @@ public class JournalSim {
         }
 
         if (!(lastAccessed == (int) evt.getTime())) {
-
             collectVmStats();
 
-            // If a full interval has been completed or first interval, move group and generate request rate per cell
+            // If a full interval has been completed or first interval, predict group movement, actually move group
+            // and generate request rate per cell
             if (((int) evt.getTime() % SAMPLING_INTERVAL == 0) || ((int) evt.getTime() < SAMPLING_INTERVAL)) {
-                // Move group
-                alreadyAccessed[prevPos.get(0)][prevPos.get(1)] = 1;
-                ArrayList<Integer> nextPos = moveGroup(0, 3, prevPos);
-                if (CREATE_NMMC_TRANSITION_MATRIX) logTransitions(GRID_SIZE * prevPos.get(0) + prevPos.get(1),
-                        GRID_SIZE * nextPos.get(0) + nextPos.get(1));
-                prevPos = nextPos;
-                howManyVisited++;
-                // Check if group has finished the tour
-                if (howManyVisited == GRID_SIZE * GRID_SIZE) {
-//                System.out.println("!!! Tour Finished");
-                    alreadyAccessed = new int[GRID_SIZE][GRID_SIZE];
-                    howManyVisited = 1;
+                // Predict group movement and random users arrival
+
+
+                for (Group group : groups) {
+                    // Move group
+                    group.updateAlreadyAccessed();
+                    group.move();
+                    if (CREATE_NMMC_TRANSITION_MATRIX) logTransitions(GRID_SIZE * group.currPos.x + group.currPos.y,
+                            GRID_SIZE * group.nextPos.x + group.nextPos.y);
+                    group.updatePosition();
                 }
-                assignedUsers = createRandomUsers(GRID_SIZE, nextPos, GROUP_SIZE);
+                assignedUsers = createRandomUsers(GRID_SIZE, groups);
                 requestRatePerCell = createRequestRate(assignedUsers);
 
                 // If a full interval has been completed, gather stats and present them
@@ -287,8 +305,8 @@ public class JournalSim {
                     int[][] intervalFinishedTasks = stats.getIntervalFinishedTasks();
                     int[][] intervalAdmittedTasks = stats.getIntervalAdmittedTasks();
                     double[][] accumulatedResponseTime = stats.getAccumulatedResponseTime();
-                    formatAndPrintIntervalStats(intervalFinishedTasks,
-                            intervalAdmittedTasks, accumulatedResponseTime);
+                    csvm.formatAndPrintIntervalStats(vmList, intervalFinishedTasks,
+                            intervalAdmittedTasks, accumulatedResponseTime, accumulatedCpuUtil);
                     accumulatedCpuUtil = new double[POI][APPS][maxVmSize];
                     lastIntervalFinishTime = (int) evt.getTime();
                 }
@@ -319,23 +337,34 @@ public class JournalSim {
                 else
                     residualWorkload[poi][app] = predictedWorkload[poi][app] - servedWorkload[app];
             }
-            System.out.println("Served Workload" + Arrays.toString(servedWorkload));
-            System.out.println("Predicted Workload" + Arrays.toString(predictedWorkload[poi]));
-            System.out.println("Residual Workload" + Arrays.toString(residualWorkload[poi]));
+//            System.out.println("Served Workload" + Arrays.toString(servedWorkload));
+//            System.out.println("Predicted Workload" + Arrays.toString(predictedWorkload[poi]));
+//            System.out.println("Residual Workload" + Arrays.toString(residualWorkload[poi]));
         }
 
-
+        System.out.println("Total Residual Workload: " + Arrays.deepToString(residualWorkload));
         return residualWorkload;
     }
-//
-//    private double[][] calculateResidualResources() {
-//
-//    }
 
-    private ArrayList<Integer>[] optimizeVmPlacement(double[][] guaranteedWorkload, double[] energyConsumption,
-                                     int hosts, double[][] predictedWorkload) {
+    private int[] calculateResidualResources(ArrayList<Integer>[] vmPlacement, int numberOfHosts) {
+        int[] residualResources = new int[POI];
+
+        int poi = 0;
+        for (ArrayList<Integer> site : vmPlacement) {
+            residualResources[poi] = numberOfHosts - site.size();
+            poi++;
+        }
+
+        System.out.println("Total Residual Resources: " + Arrays.toString(residualResources));
+        return residualResources;
+    }
+
+    private ArrayList<Integer>[] optimizeVmPlacement(ArrayList<int[][]> feasibleFormations, double[][] guaranteedWorkload,
+                                                     double[] energyConsumption, int hosts, double[][] predictedWorkload,
+                                                     int edgeHostPes, double cutOffPoint) {
         ArrayList<Integer>[] vmPlacement = new ArrayList[POI];
 
+        // Solve lp optimization
         for (int poi = 0; poi < POI; poi++) {
 //            System.out.println(Arrays.deepToString(guaranteedWorkload));
 //            System.out.println(Arrays.toString(energyConsumption));
@@ -345,7 +374,20 @@ public class JournalSim {
                 e.printStackTrace();
             }
         }
-        System.out.println("\n\n" + Arrays.deepToString(vmPlacement));
+//        System.out.println("\n\n" + Arrays.deepToString(vmPlacement));
+
+        // Cut out "underutilised" servers. Underutilisation criteria = less than 50% of the cores allocated
+        for (ArrayList<Integer> site : vmPlacement) {
+            for (int server : site) {
+                int serverCoreSum = 0;
+                for (int app = 0; app < APPS; app++) serverCoreSum += IntStream.of(feasibleFormations.get(server)[app]).sum();
+//                System.out.println(serverCoreSum);
+
+                if ((serverCoreSum / (double) edgeHostPes) <= cutOffPoint) site.remove(server);
+            }
+        }
+        System.out.println("Vm Placement: " + Arrays.deepToString(vmPlacement));
+
         return vmPlacement;
     }
 
@@ -362,7 +404,7 @@ public class JournalSim {
             }
         }
 
-//        System.out.println(Arrays.deepToString(guaranteedWorkload));
+        System.out.println("Server Formations Guaranteed Workload: " + Arrays.deepToString(guaranteedWorkload));
 
         return guaranteedWorkload;
     }
@@ -384,6 +426,8 @@ public class JournalSim {
             }
         }
 
+        System.out.println("Server Formations Power Consumption: " + Arrays.toString(energyConsumption));
+
         return energyConsumption;
     }
 
@@ -400,7 +444,7 @@ public class JournalSim {
         // Get permutations per App
         for (int length = 1; length <= serverCores; length++) {
             for (int app = 0; app < APPS; app++) {
-                for (int[] permutation : calculatePermutationsOfLength(flavorCores[app], length)) {
+                for (int[] permutation : Permutator.calculatePermutationsOfLength(flavorCores[app], length)) {
                     // First Check
                     if (IntStream.of(permutation).sum() <= serverCores) tempFormations.add(permutation);
                 }
@@ -408,7 +452,7 @@ public class JournalSim {
         }
 
         // Get total feasible permutations
-        for (int[][] permutation : calculatePermutationsOfLength(tempFormations, APPS)) {
+        for (int[][] permutation : Permutator.calculatePermutationsOfLength(tempFormations, APPS)) {
             int permutationCoreSum = 0;
             for (int app = 0; app < APPS; app++) permutationCoreSum += IntStream.of(permutation[app]).sum();
             if (permutationCoreSum <= serverCores) formations.add(permutation);
@@ -432,68 +476,10 @@ public class JournalSim {
             int permutationCoreSum = 0;
             for (int app = 0; app < APPS; app++) permutationCoreSum += IntStream.of(permutation[app]).sum();
 //            System.out.println(permutationCoreSum);
-            System.out.println(Arrays.deepToString(permutation));
+//            System.out.println(Arrays.deepToString(permutation));
         }
 
         return uniqueFormations;
-    }
-
-    private ArrayList<int[]> calculatePermutationsOfLength(int[] flavorCores, int length) {
-        ArrayList<int[]> permutations = new ArrayList<>();
-        int size = flavorCores.length;
-
-        // There can be (len)^l permutations
-        for (int i = 0; i < (int)Math.pow(size, length); i++) {
-            // Convert i to len th base
-            permutations.add(createPermutation(i, flavorCores, size, length));
-        }
-
-        return permutations;
-    }
-
-    // Overloading
-    private ArrayList<int[][]> calculatePermutationsOfLength(ArrayList<int[]> formations, int length) {
-        ArrayList<int[][]> permutations = new ArrayList<>();
-        int size = formations.size();
-
-        // There can be (len)^l permutations
-        for (int i = 0; i < (int)Math.pow(size, length); i++) {
-            // Convert i to len th base
-            permutations.add(createPermutation(i, formations, size, length));
-        }
-
-        return permutations;
-    }
-
-    private int[] createPermutation(int n, int arr[], int len, int L) {
-        int[] permutation = new int[L];
-        // Sequence is of length L
-        for (int i = 0; i < L; i++) {
-            // Print the ith element of sequence
-//            System.out.print(arr[n % len]);
-            permutation[i] = arr[n % len];
-            n /= len;
-        }
-//        System.out.print();
-//        System.out.println(Arrays.toString(permutation));
-
-        return permutation;
-    }
-
-    // Overloading
-    private int[][] createPermutation(int n, ArrayList<int[]> arr, int len, int L) {
-        int[][] permutation = new int[APPS][];
-
-        // Sequence is of length L
-        for (int i = 0; i < L; i++) {
-            // Print the ith element of sequence
-//            System.out.print(arr[n % len]);
-            permutation[i] = arr.get(n % len);
-            n /= len;
-        }
-//        System.out.println(Arrays.deepToString(permutation));
-
-        return permutation;
     }
 
     private void collectVmStats() {
@@ -555,45 +541,6 @@ public class JournalSim {
         return new IntervalStats(intervalFinishedTasks, intervalAdmittedTasks, accumulatedResponseTime);
     }
 
-    private void formatAndPrintIntervalStats(int[][] intervalFinishedTasks, int[][] intervalAdmittedTasks,
-                                             double[][] accumulatedResponseTime) {
-        try {
-            BufferedWriter br = new BufferedWriter(new FileWriter(WRITE_INTERVALS_CSV_FILE_LOCATION, true));
-            StringBuilder sb = new StringBuilder();
-
-            System.out.printf("%n%n------------------------- INTERVAL INFO --------------------------%n%n");
-            System.out.printf(" POI | App | Admitted Tasks| Finished Tasks | Average Throughput | Average Response Time \n");
-            for (int poi = 0; poi < POI; poi++) {
-                for (int app = 0; app < APPS; app++) {
-                    // Print in screen
-                    System.out.println(String.format("%4s", poi) + " | " + String.format("%3s", app) + " | " +
-                        String.format("%14s", intervalAdmittedTasks[poi][app]) + " | " + String.format("%14s",
-                        intervalFinishedTasks[poi][app]) + " | " + String.format("%18.2f", intervalFinishedTasks[poi][app]
-                        / (double) SAMPLING_INTERVAL) + " | " + String.format("%21.2f", accumulatedResponseTime[poi][app] /
-                            intervalFinishedTasks[poi][app]));
-                    // Print in the CSV file
-                    sb.append(poi + "," + app + "," + intervalAdmittedTasks[poi][app] + "," + intervalFinishedTasks[poi][app] +
-                        "," + String.format("%.2f", intervalFinishedTasks[poi][app] / (double) SAMPLING_INTERVAL) + ","
-                        + String.format("%.2f", accumulatedResponseTime[poi][app] / intervalFinishedTasks[poi][app]) + "\n");
-                }
-            }
-            br.write(sb.toString());
-            br.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        System.out.println("\n------------------------------------------------------------------\n");
-        System.out.printf(" VM | Average CPU Util. \n");
-        for (int poi = 0; poi < POI; poi++) {
-            for (int app = 0; app < APPS; app++) {
-                for (int vm = 0; vm < vmList[poi][app].size(); vm++) {
-                    System.out.println(String.format("%3s", poi + "" + app + "" + vm) + " | " +
-                        String.format("%17.2f", (accumulatedCpuUtil[poi][app][vm] / SAMPLING_INTERVAL) * 100));
-                }
-            }
-        }
-    }
-
     private void correctlyCreateVmDescriptions() {
         for (int poi = 0; poi < POI; poi++) {
             for (int app = 0; app < APPS; app++) {
@@ -602,72 +549,6 @@ public class JournalSim {
                     vm.setDescription("{\"App\": " + app + " }"); // Vm Description in Json format
                 }
             }
-        }
-    }
-
-    private HashMap<String, double[]> readNMMCTransitionMatrixCSV() {
-        HashMap<String, double[]> records = new HashMap<>();
-        try (Scanner scanner = new Scanner(new File(READ_NMMC_CSV_FILE_LOCATION));) {
-            while (scanner.hasNextLine()) {
-                Pair<String, double[]> record = getRecordFromLine(scanner.nextLine());
-                records.put(record.getKey(), record.getValue());
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-        return records;
-    }
-
-    private Pair<String, double[]> getRecordFromLine(String line) {
-        double[] value = new double[POI];
-        String key;
-        int i = 0;
-        try (Scanner rowScanner = new Scanner(line)) {
-            rowScanner.useDelimiter(",");
-            // First element is extracted as the key
-            key = rowScanner.next();
-//            System.out.print(key + " -> ");
-            while (rowScanner.hasNext()) {
-                value[i] = Double.parseDouble(rowScanner.next());
-                i++;
-            }
-//            System.out.println(Arrays.toString(value));
-        }
-        return new Pair<>(key, value);
-    }
-
-    private void createNMMCTransitionMatrixCSV() {
-        // Sort HashMap by Keys
-        Map<String, int[]> sortedTransitionLog = new TreeMap<>(transitionsLog);
-
-        sortedTransitionLog.entrySet().forEach(entry -> {
-            System.out.println(entry.getKey() + " -> " + Arrays.toString(entry.getValue()));
-        });
-
-        List<String> statesList = new ArrayList<>(sortedTransitionLog.keySet());
-        int statesListIterator = 0;
-        double[][] transitionMatrix = createNMMCTransitionMatrix(POI, sortedTransitionLog);
-
-        // Write transition matrix to CSV
-        try {
-            BufferedWriter br = new BufferedWriter(new FileWriter(WRITE_NMMC_CSV_FILE_LOCATION));
-            StringBuilder sb = new StringBuilder();
-            DecimalFormat df = new DecimalFormat("0.00");
-            for (double[] transitionsVector : transitionMatrix) {
-                sb.append(statesList.get(statesListIterator));
-                sb.append(",");
-                statesListIterator++;
-                for (double transitionProbability : transitionsVector) {
-                    sb.append(df.format(transitionProbability));
-                    sb.append(",");
-                }
-                sb.setLength(sb.length() - 1);
-                sb.append("\n");
-            }
-            br.write(sb.toString());
-            br.close();
-        } catch (IOException e) {
-            e.printStackTrace();
         }
     }
 
@@ -685,45 +566,6 @@ public class JournalSim {
         transitionsLog.entrySet().forEach(entry -> {
             System.out.println(entry.getKey() + " -> " + Arrays.toString(entry.getValue()));
         });
-    }
-
-    private double[][] createNMMCTransitionMatrix(int numberOfStates, Map<String, int[]> sortedTransitionLog) {
-//        int rows = (int) (1 - Math.pow(numberOfStates, (history + 2))) / (1 - numberOfStates) - 1;
-        int rows = sortedTransitionLog.size();
-        int columns = numberOfStates;
-        int x = 0;
-        int y;
-//        System.out.println("Rows: " + rows);
-//        System.out.println("Columns: " + columns);
-        double[][] transitionMatrix = new double[rows][columns];
-        for (int[] transitionsVector : sortedTransitionLog.values()) {
-            int rowSum = 0;
-            y = 0;
-            for (int transitionProbability : transitionsVector) {
-                rowSum += transitionProbability;
-            }
-//            System.out.println("RowSum: " + rowSum);
-            for (int transitionFrequency : transitionsVector) {
-//                System.out.println("X: " + x);
-//                System.out.println("Y: " + y);
-//                System.out.println("Transition Frequency: " + transitionFrequency);
-                transitionMatrix[x][y] = transitionFrequency / (double) rowSum;
-//                System.out.println("Transition Probability: " + transitionMatrix[x][y]);
-                y++;
-            }
-            x++;
-        }
-
-        System.out.println("\nTransition Matrix: ");
-        for (double[] line : transitionMatrix) {
-            for (double tile : line) {
-                System.out.printf("%.2f ", tile);
-            }
-            System.out.println();
-        }
-        System.out.println("-----------");
-
-        return transitionMatrix;
     }
 
     private void generateRequests(double[][] requestRatePerCell, EventInfo evt, int app) {
@@ -764,162 +606,32 @@ public class JournalSim {
                 }
             }
         }
-//        System.out.println(Arrays.deepToString(assignedUsers));
-//        System.out.println(Arrays.deepToString(requestRatePerCell));
+        System.out.println(Arrays.deepToString(assignedUsers));
+        System.out.println(Arrays.deepToString(requestRatePerCell));
 
         return requestRatePerCell;
     }
 
-    private int[][] createRandomUsers(int gridSize, ArrayList<Integer> groupPos, int groupSize) {
+    private int[][] createRandomUsers(int gridSize, Group[] groups) {
         Random random = new Random();
         int[][] usersPerCell = new int[gridSize][gridSize];
 
-        for (int i = 0; i < gridSize; i++) {
-            for (int j = 0; j < gridSize; j++) {
-                usersPerCell[i][j] = random.nextInt(MAX_USERS_PER_CELL);
+        for (Group group : groups)
+            usersPerCell[group.currPos.x][group.currPos.y] += group.size - 1 + random.nextInt(2);
+        for (int i = 0; i < GRID_SIZE; i++) {
+            for (int j = 0; j < GRID_SIZE; j++) {
+                if (usersPerCell[i][j] < 0) usersPerCell[i][j] = 0;
             }
         }
-        usersPerCell[groupPos.get(0)][groupPos.get(1)] += groupSize;
-//        System.out.println("Users Per Cell");
-//        for (int[] line : usersPerCell) {
-//                for (int tile : line) {
-//                    System.out.print(tile + " ");
-//                }
-//                System.out.println();
-//            }
-//            System.out.println("-----------");
+        System.out.println("Users Per Cell");
+        for (int[] line : usersPerCell) {
+                for (int tile : line) {
+                    System.out.print(tile + " ");
+                }
+                System.out.println();
+            }
+            System.out.println("-----------");
         return usersPerCell;
-    }
-
-    private Double[][] readSimCSVData(String filename) {
-        ArrayList<ArrayList<Double>> simTempListData = new ArrayList<>();
-        BufferedReader csvReader = null;
-
-        try {
-            csvReader = new BufferedReader(new FileReader(filename));
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-        while (true) {
-            String row = "";
-            try {
-                if (!((row = csvReader.readLine()) != null)) break;
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            String[] str_data = row.split(";");
-            int size = str_data.length;
-            ArrayList<Double> dbl_data = new ArrayList<>();
-            // Convert to doubles
-            for(int i = 0; i < size; i++) {
-                dbl_data.add(Double.parseDouble(str_data[i]));
-            }
-//            System.out.println(Arrays.toString(dbl_data.toArray()));
-            simTempListData.add(dbl_data);
-        }
-        try {
-            csvReader.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        // Convert Arraylist of Arraylists to 2d Array one-liner
-        Double[][] simTempArrayData = simTempListData.stream().map(u -> u.toArray(new Double[0])).toArray(Double[][]::new);
-//        System.out.println(Arrays.deepToString(simTempArrayData));
-
-        return simTempArrayData;
-    }
-
-    private ArrayList<Integer> moveGroup(int secondsLeft, int gridSize,  ArrayList<Integer> currPos) {
-        int posX = 0;
-        int posY = 0;
-
-        if (secondsLeft != 0) {
-            secondsLeft--;
-        }
-        else {
-            // Choose next position
-            ArrayList<ArrayList<Double> > grid = new ArrayList(3);
-            double largestDist = 0;
-            for (int x = 0; x < gridSize; x++) {
-                ArrayList<Double> line = new ArrayList<>();
-                for (int y = 0; y < gridSize; y++) {
-                    double dist = Math.abs(currPos.get(0) - x) + Math.abs(currPos.get(1) - y);
-                    line.add(dist);
-                    if (dist > largestDist) {
-                        largestDist = dist;
-                    }
-                }
-                grid.add(line);
-            }
-
-            double newVal;
-            double totalVal = 0; // this will be used to form the cumulative distribution function
-            for (int x = 0; x < gridSize; x++) {
-                for (int y = 0; y < gridSize; y++) {
-                    double tile = grid.get(x).get(y);
-                    if (tile == 0) {
-                        newVal = 0;
-                    }
-                    else {
-                        newVal = Math.round(largestDist/tile * 100.0) / 100.0;
-                    }
-                    grid.get(x).set(y, newVal);
-                    totalVal += newVal;
-                }
-            }
-
-            // Pick next step with the help of a Gaussian Probability distribution
-            Random rand = new Random();
-            int p;
-            double cumulativeProbability;
-            Boolean selectedNextState = false;
-            while (!selectedNextState) {
-                p = rand.nextInt((int) totalVal);
-                cumulativeProbability = 0;
-                outerLoop:
-                for (int x = 0; x < gridSize; x++) {
-                    for (int y = 0; y < gridSize; y++) {
-                        cumulativeProbability += grid.get(x).get(y);
-                        if (p <= cumulativeProbability && alreadyAccessed[x][y] == 0) {
-//                        System.out.println(totalVal);
-//                        System.out.println(p);
-//                        System.out.println(cumulativeProbability);
-//                        System.out.println(tile);
-//                        System.out.println("-----------");
-//                        System.out.println(x);
-//                        System.out.println(y);
-                            posY = y;
-                            posX = x;
-                            selectedNextState = true;
-                            break outerLoop;
-                        }
-                    }
-                }
-            }
-//            System.out.println();
-//
-//            System.out.println("Already Accessed: ");
-//            for (int[] line : alreadyAccessed) {
-//                for (int tile : line) {
-//                    System.out.print(tile + " ");
-//                }
-//                System.out.println();
-//            }
-//            System.out.println("-----------");
-//
-//            System.out.println("Group's Position:");
-//            for (ArrayList<Double> line : grid) {
-//                for (Double tile : line) {
-////                    System.out.print(tile + " ");
-//                    if (tile == 0.0) System.out.print("X ");
-//                    if (tile != 0.0) System.out.print("0 ");
-//                }
-//                System.out.println();
-//            }
-//            System.out.println("-----------");
-        }
-
-        return new ArrayList<>(Arrays.asList(posX, posY));
     }
 
     private Datacenter createDatacenter(int hosts, int hostPes, int hostPeMips, int hostRam, int hostBw) {
@@ -1000,17 +712,7 @@ public class JournalSim {
     }
 
     private void runSimulationAndPrintResults() {
-        // Initial Configuration of "Interval Stats" CSV file
-        try {
-            Files.deleteIfExists(Paths.get(WRITE_INTERVALS_CSV_FILE_LOCATION));
-            BufferedWriter br = new BufferedWriter(new FileWriter(WRITE_INTERVALS_CSV_FILE_LOCATION));
-            StringBuilder sb = new StringBuilder();
-            sb.append("POI,App,Admitted Tasks,Finished Tasks,Average Throughput,Average Response Time\n");
-            br.write(sb.toString());
-            br.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+
         simulation.terminateAt(TIME_TO_TERMINATE_SIMULATION);
         simulation.addOnClockTickListener(this::masterOfPuppets);
         simulation.start();
