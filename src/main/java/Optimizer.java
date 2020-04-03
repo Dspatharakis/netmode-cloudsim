@@ -18,7 +18,6 @@ public final class Optimizer {
         ArrayList<Integer> result = new ArrayList<>();
         LpSolve lp;
         int nCol, k, ret = 0;
-
         int n = serverGuaranteedWorkload.length;
         // create a model with 0 rows and n columns
         nCol = n; // n variables
@@ -116,11 +115,11 @@ public final class Optimizer {
 //            while (result.size() < hosts) result.add(0); // TODO not sure if needed anymore
 //            System.out.println(Arrays.toString(result.toArray()));
 //            lp.printSolution(0);
-            lp.writeLp("/Users/avgr_m/Downloads/lpSolution.txt");
+            lp.writeLp("/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/lpSolution.txt");
             /* we are done now */
         } else {
 //            System.out.println("\n\t#----------------------------- Optimizer failed; solving maximization problem");
-            lp.writeLp("/Users/avgr_m/Downloads/lpSolution.txt");
+            lp.writeLp("/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/lpSolution.txt");
             result = maximizeServedRequests(serverGuaranteedWorkload, hosts, predictedWorkload);
         }
 

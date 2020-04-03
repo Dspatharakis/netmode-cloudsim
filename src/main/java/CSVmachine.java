@@ -11,10 +11,12 @@ public final class CSVmachine {
     // TODO: read these values from external file
     // TODO: set debugging toggle and different colors
 
-    private static final String WRITE_INTERVALS_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/intervalStats.csv";
-    private static final String SIM_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/leivaDatas.csv";
-    private static final String READ_NMMC_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/transitionMatrix(2history12000intervals).csv";
-    private static final String WRITE_NMMC_CSV_FILE_LOCATION = "/Users/avgr_m/Downloads/transitionMatrix.csv";
+
+    private static final String SIM_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/leivaDatas.csv";
+    private static final String READ_NMMC_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/transitionMatrix(2history12000intervals).csv";
+    private static final String WRITE_NMMC_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/transitionMatrix.csv";
+    private static final String WRITE_INTERVALS_CSV_FILE_LOCATION = "/home/dspath/Documents/Dsgit/leivadeas/netmode-cloudsim/intervalStats.csv";
+
     private int pois;
     private int apps;
     private int samplingInterval;
@@ -45,7 +47,7 @@ public final class CSVmachine {
 
             System.out.printf("%n%n------------------------- INTERVAL INFO --------------------------%n%n");
             System.out.printf(" POI | App | Admitted Tasks | Finished Tasks | Average Throughput | Average Response Time \n");
-            for (int poi = 0; poi < pois; poi++) {
+            for (int poi = 0; poi < 2*pois; poi++) {
                 for (int app = 0; app < apps; app++) {
                     // Print in screen
                     System.out.println(String.format("%4s", poi) + " | " + String.format("%3s", app) + " | " +

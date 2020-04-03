@@ -93,6 +93,40 @@ public class NetmodeSim {
     private LoadBalancer[] loadBalancer;
     ArrayList<Vm>[] vmPool;
 
+    //TODO ds initilizations
+    ArrayList <Vm>[] staticVmList;
+    double[][] ArrivalRateLB;
+    //Algorithm settings
+    private double D=1000000000;
+    private double d= 0.11;                            // parameter for |D|<d
+    private double e= 0.1;                            // e parameter for accuracy parameter
+    private double u= 0.1;                             // theta parameter for accuracy
+    //default structure of cloudsimplus
+    private double [] Ti = new double [POI];
+    private int[] OverloadedCloudlets = new int[POI];
+    private int[] UnderloadedCloudlets = new int[POI];
+    //TODO ds find these values
+    double[] ServiceRate = {400,200,300,500,405,675,349,348,157f};
+    double[] NumberofServers = {2,4,3,4,5,4,5,4,3};
+    double [][] predictedWorkloadStatic = {{100, 100}, {50, 50}, {70, 70}, {100, 100}, {50, 50}, {70, 70}, {100, 100}, {50, 50}, {70, 70}};
+    private double [] fi = new double [POI];
+    private double [] fj = new double [POI];
+    private double[] lj = new double[POI];  // synolikh roh poy mpenei se kathe underloaded
+    private double[] li = new double[POI];
+    //private double[] ArrivalRate = new double[POI];
+    private double Dtotal;
+    private double[][] AverageResponseTimeTi = new double[POI][32000]; // HTAN 4000
+    private static double[][] NetDelay ={{0.000000,0.174351,0.151792,0.102222,0.121226,0.167159,0.136996,0.151449,0.137782},
+            {0.174351,0.000000,0.104213,0.118699,0.187412,0.197028,0.168254,0.144612,0.177855},
+            {0.151792,0.104213,0.000000,0.182387,0.133270,0.132010,0.192918,0.146808,0.122887},
+            {0.102222,0.118699,0.182387,0.000000,0.189572,0.102149,0.114024,0.154943,0.114506},
+            {0.121226,0.187412,0.133270,0.189572,0.000000,0.136235,0.108649,0.182796,0.126507},
+            {0.167159,0.197028,0.132010,0.102149,0.136235,0.000000,0.167916,0.115575,0.131254},
+            {0.136996,0.168254,0.192918,0.114024,0.108649,0.167916,0.000000,0.191353,0.105500},
+            {0.151449,0.144612,0.146808,0.154943,0.182796,0.115575,0.191353,0.000000,0.174703},
+            {0.137782,0.177855,0.122887,0.114506,0.126507,0.131254,0.105500,0.174703,0.000000}};
+
+
     public static void main(String[] args) {
         new NetmodeSim();
     }
@@ -102,9 +136,9 @@ public class NetmodeSim {
 
         transitionsLog = new HashMap<>();
         accumulatedCpuUtil = new HashMap<>();
-        vmList = (ArrayList<Vm>[][]) new ArrayList[POI][APPS];
-        taskList = (ArrayList<TaskSimple>[][]) new ArrayList[POI][APPS];
-        taskCounter = new int[POI][APPS];
+        vmList = (ArrayList<Vm>[][]) new ArrayList[2*POI][APPS];
+        taskList = (ArrayList<TaskSimple>[][]) new ArrayList[2*POI][APPS];
+        taskCounter = new int[2*POI][APPS];
 
         simData = csvm.readSimCSVData();
         firstEvent = true;
@@ -113,7 +147,7 @@ public class NetmodeSim {
         createGroups(GROUPS, GROUP_SIZE, APPS, GRID_SIZE);
 
         // Add one broker and one datacenter per Point of Interest
-        createBrokersAndDatacenters(POI);
+        createBrokersAndDatacenters(2*POI);
 
         // Initialize transition probabilities to use for group movement prediction (mobility)
         if (!CREATE_NMMC_TRANSITION_MATRIX) {
@@ -123,6 +157,25 @@ public class NetmodeSim {
 //                System.out.println(entry.getKey() + " -> " + Arrays.toString(entry.getValue()));
 //            });
         }
+
+        //TODO ds translate number of servers and serviceRate per server to static placement
+        //TODO ds perform static placement of vms and hosts for POI 9 -> 18
+        //TODO ds service rate number of servers per app
+        //TODO define network delay matrix and upper value of arrival rate!!
+        for (int i = 0; i < POI; i++) {
+            for (int j=0; (j < 32000); j++)                      //htan 4000
+                CalculationofAverageResponseTime( (double)j/100, ServiceRate[i], (int)NumberofServers[i], i);
+        }
+        //TODO (DONE) ds calculate offline averageResponseTime
+        //TODO (DONE) ds after the estimation of workload load balance it between cloudlets
+        //TODO (DONE) ds call for each time the algorithm per app! feed the algorithm with the placement for each app and the workload for each app
+
+        feasibleFormations = calculateFeasibleServerFormations(EDGE_HOST_PES, VM_PES);
+        guaranteedWorkload = calculateServerGuaranteedWorkload(feasibleFormations);
+        energyConsumption = calculateServerPowerConsumption(feasibleFormations, EDGE_HOST_PES);
+        ArrayList<Integer>[] vmPlacementStatic =
+                optimizeVmPlacement(EDGE_HOSTS, predictedWorkloadStatic, EDGE_HOST_PES, UNDERUTILISED_VM_CUTOFF);
+        staticVmList = spawnStaticVms(feasibleFormations, vmPlacementStatic);
 
         // Calculate variables required for VM optimization
         feasibleFormations = calculateFeasibleServerFormations(EDGE_HOST_PES, VM_PES);
@@ -203,12 +256,23 @@ public class NetmodeSim {
                 requestRatePerCell = createRequestRate(createUsers(GRID_SIZE, groups),
                         APP_REQUEST_RATE_PER_USER, predictedWorkload);
 
+                //TODO (DONE) ds load balancing before that! predicted workload is the next arrival rate per poi per app.
+                double [][] NextArrivalRate = new double [POI][APPS];
+                for (int app = 0; app < APPS; app++) {
+                    double [] AppArrivalRate = new double [POI];
+                    AppArrivalRate = Algorithm1(ServiceRate, NumberofServers,predictedWorkload,app);
+                    for (int poi = 0; poi < POI; poi++){
+                        NextArrivalRate[poi][app] = AppArrivalRate[poi];
+                    }
+                }
+                ArrivalRateLB = NextArrivalRate;
+
                 // First interval arrangements are now over
                 if (firstEvent) firstEvent = false;
             }
 
             // Actually create the requests based on the previously generated request rate and delegate them per VM/app
-            if (!CREATE_NMMC_TRANSITION_MATRIX) generateRequests(requestRatePerCell, evt);
+            if (!CREATE_NMMC_TRANSITION_MATRIX) generateRequests(requestRatePerCell, ArrivalRateLB, evt);
 
             // Vm resource usage stats collected per second
             collectVmStats();
@@ -446,7 +510,7 @@ public class NetmodeSim {
     }
 
     private void collectVmStats() {
-        for (int poi = 0; poi < POI; poi++) {
+        for (int poi = 0; poi < 2* POI; poi++) {
             for (int app = 0; app < APPS; app++) {
                 for (Vm vm : loadBalancer[poi].vmsOfApp[app]) {
                     if (accumulatedCpuUtil.containsKey(vm.getId()))
@@ -454,20 +518,20 @@ public class NetmodeSim {
                                 accumulatedCpuUtil.get(vm.getId()) + vm.getCpuPercentUtilization());
                     else
                         accumulatedCpuUtil.put(vm.getId(), vm.getCpuPercentUtilization());
-                    System.out.println("VM ID: " + vm.getId());
-                    System.out.println("Current CPU Util: " + vm.getCpuPercentUtilization());
-                    System.out.println("Total CPU Util: " + accumulatedCpuUtil.get(vm.getId()));
+                    //System.out.println("VM ID: " + vm.getId());
+                    //System.out.println("Current CPU Util: " + vm.getCpuPercentUtilization());
+                    //System.out.println("Total CPU Util: " + accumulatedCpuUtil.get(vm.getId()));
                 }
             }
         }
     }
 
     private IntervalStats collectTaskStats() {
-        int[][] intervalFinishedTasks = new int[POI][APPS];
-        int[][] intervalAdmittedTasks = new int[POI][APPS];
-        double[][] accumulatedResponseTime  = new double[POI][APPS];
+        int[][] intervalFinishedTasks = new int[2*POI][APPS];
+        int[][] intervalAdmittedTasks = new int[2*POI][APPS];
+        double[][] accumulatedResponseTime  = new double[2*POI][APPS];
 
-        for (int poi = 0; poi < POI; poi++) {
+        for (int poi = 0; poi < 2*POI; poi++) {
 //                System.out.println(edgeBroker[poi].getCloudletFinishedList().size());
             for (Cloudlet c : edgeBroker[poi].getCloudletFinishedList()) {
                 // Ensure that Task has been completed within the Interval
@@ -488,7 +552,7 @@ public class NetmodeSim {
             }
         }
 
-        for (int poi = 0; poi < POI; poi++) {
+        for (int poi = 0; poi < 2*POI; poi++) {
 //               System.out.println(edgeBroker[poi].getCloudletFinishedList().size());
 //            System.out.println(edgeBroker[poi].getCloudletSubmittedList().size());
             for (Cloudlet c : edgeBroker[poi].getCloudletSubmittedList()) {
@@ -523,8 +587,10 @@ public class NetmodeSim {
     }
 
     // TODO: reconsider according to https://preshing.com/20111007/how-to-generate-random-timings-for-a-poisson-process/
-    private void generateRequests(double[][][] requestRatePerCellPerApp, EventInfo evt) {
+    private void generateRequests(double[][][] requestRatePerCellPerApp, double[][] arrivalRateLB, EventInfo evt) {
         PoissonDistribution pD;
+        PoissonDistribution pDLB;
+        int tasksToCreateLB;
         int tasksToCreate;
 
         for (int i = 0; i < GRID_SIZE; i++) {
@@ -534,12 +600,20 @@ public class NetmodeSim {
                     if (requestRatePerCellPerApp[i][j][app] != 0) {
                         pD = new PoissonDistribution(requestRatePerCell[i][j][app] / SAMPLING_INTERVAL);
                         tasksToCreate = pD.sample();
-                        taskList[poi][app] = new ArrayList<>();
+                        taskList[9+poi][app] = new ArrayList<>();
                         System.out.printf("%n#-----> Creating %d Task(s) at PoI %d, for App %d at time %.0f sec.%n",
                                 tasksToCreate, poi, app, evt.getTime());
                         taskList[poi][app] = (ArrayList<TaskSimple>) createTasks(tasksToCreate, poi, app, 0);
                         edgeBroker[poi].submitCloudletList(taskList[poi][app]);
                         loadBalancer[poi].balanceTasks(taskList[poi][app], app);
+                        //TODO ds this is mine!
+                        System.out.printf("%n#-----> Creating %d Task(s) at PoI %d, for App %d at time %.0f sec.%n",
+                                tasksToCreate, 9+poi, app, evt.getTime());
+                        pDLB = new PoissonDistribution(requestRatePerCell[i][j][app] / SAMPLING_INTERVAL);
+                        tasksToCreateLB = pDLB.sample();
+                        taskList[9+poi][app] = (ArrayList<TaskSimple>) createTasks(tasksToCreateLB, 9+poi, app, 0);
+                        edgeBroker[9+poi].submitCloudletList(taskList[9+poi][app]);
+                        loadBalancer[9+poi].balanceTasks(taskList[9+poi][app], app);
 //                        for (TaskSimple task : taskList[poi][app]) {
 //                            if (task.getVm().getCloudletScheduler().getClass() == CloudletSchedulerTimeShared.class) {
 //                                CloudletSchedulerTimeShared sched = (CloudletSchedulerTimeShared) task.getVm().getCloudletScheduler();
@@ -722,9 +796,9 @@ public class NetmodeSim {
     }
 
     private void createLoadBalancers(ArrayList<Vm>[] vmPool) {
-        loadBalancer = new LoadBalancer[POI];
-        for (int poi = 0; poi < POI; poi++)
-            loadBalancer[poi] = new LoadBalancer(vmPool[poi], APPS, poi);
+        loadBalancer = new LoadBalancer[2*POI];
+        for (int poi = 0; poi < 2*POI; poi++) {
+            loadBalancer[poi] = new LoadBalancer(vmPool[poi], APPS, poi);}
     }
 
     private void destroyVms() {
@@ -743,7 +817,7 @@ public class NetmodeSim {
     }
 
     private ArrayList<Vm>[] spawnVms(ArrayList<int[][]> feasibleFormations, ArrayList<Integer>[] vmPlacement) {
-        ArrayList<Vm>[] vmPool = new ArrayList[POI];
+        ArrayList<Vm>[] vmPool = new ArrayList[2*POI];
 
         // Destroy existing VMs
         destroyVms();
@@ -786,6 +860,12 @@ public class NetmodeSim {
 //            for (Vm vm : vmPool[poi])
 //                System.out.println("VM ID: " + vm.getId() + ", VM APP: " + vm.getDescription());
 //        }
+        for (int poi = 9; poi < 2*POI; poi++) {
+            vmPool[poi] = new ArrayList<>();
+            System.out.println("VM pool per poi 1 " + vmPool[poi]+staticVmList[poi]);
+            vmPool[poi].addAll(staticVmList[poi]);
+            System.out.println("VM pool per poi" + vmPool[poi]);
+        }
 
         return vmPool;
     }
@@ -795,9 +875,298 @@ public class NetmodeSim {
         simulation.addOnClockTickListener(this::masterOfPuppets);
         simulation.start();
         List<TaskSimple> tasks = new ArrayList<>();
-        for (int poi = 0; poi < POI; poi++) {
+        for (int poi = 0; poi < 2*POI; poi++) {
             tasks.addAll(edgeBroker[poi].getCloudletFinishedList());
         }
         if (!CREATE_NMMC_TRANSITION_MATRIX) new CloudletsTableBuilder(tasks).build();
     }
+
+
+    private void CalculationofAverageResponseTime(double li, double mi, int ni, int indexofhost) {
+        int j = (int) (100*li);
+        if (j < 0 || mi <= 0 || ni <= 0)
+            throw new IllegalArgumentException("The parameters cannot be negative!");
+        if (li==0) {
+            AverageResponseTimeTi[indexofhost][(int)j] =0;
+        }
+        else
+        if (li<ni*mi-0.25) {
+            ErlangC d=new ErlangC(li,mi,ni);
+            double waitProb = d.getProbDelay(li,mi,ni);
+            double waitTime = d.getAverageWaitTime(li,mi,ni);
+            AverageResponseTimeTi[indexofhost][(int) j] = waitTime;
+            //System.out.println(waitProb);
+            //System.out.println(waitTime);
+        }
+        else {
+            li = ni*mi-0.25;
+            ErlangC d = new ErlangC(li, mi, ni);
+            double waitTime = d.getAverageWaitTime(li, mi, ni);
+            AverageResponseTimeTi[indexofhost][(int) j] = waitTime;
+        }
+
+    }
+
+
+    public double [] Algorithm1(double [] ServiceRate, double [] NumberofServers,double [][] PredictedWorkload,int app) {
+        //TODO ds arrival rate = mi*ni - 0.25 at each time
+        double[] ArrivalRate = new double [POI];
+        if (app ==0){
+            for (int i = 0; i < POI; i++) {
+                ArrivalRate[i] = PredictedWorkload[i][0];
+            }
+        }
+        else {
+            for (int i = 0; i < POI; i++) {
+                ArrivalRate[i] = PredictedWorkload[i][1];
+            }
+        }
+//        for(int i = 0; i < POI; i++) {
+//            System.out.println(ArrivalRate[i]);
+//        }
+//        try
+//        {
+//            System.in.read();
+//        }
+//        catch(Exception e)
+//        {}
+
+        long thisTime = System.currentTimeMillis();
+        double D = 1000000000;
+        double Tmax = -2;
+        double Tmin = 100;
+        double [] Tbefore= new double [POI];
+        for (int i = 0; i < POI; i++) {
+            lj[i]=0;
+            li[i]=0;
+            int arrivalrate = (int) (100 * ArrivalRate[i]);
+            //System.out.println("arrival rate ");
+            Ti[i] = AverageResponseTimeTi[i][arrivalrate];
+            Tbefore[i]=Ti[i];
+            if (Tmax < Ti[i]) Tmax = Ti[i];
+            if (Tmin > Ti[i]) Tmin = Ti[i];
+            //System.out.println("Ti "+ Ti[i] + " Host: "+ i + " ArrivalRate: " + ArrivalRate[i] + " Tmax: " + Tmax + " Tmin " + Tmin);
+        }
+        int counterbreak=0;
+        while ((D > d) || (D < -d) ) {
+            //System.out.println("arrival rate ");
+            int pointerOver = 0;
+            int pointerUnder = 0;
+            Dtotal = (Tmax + Tmin) / 2;
+            //        Log.printFormatted("\t Dtotal : %f     \n",               Dtotal            );
+            for (int i = 0; i < POI; i++) {
+                fi[i] = 0;
+                fj[i] = 0;
+                if (AverageResponseTimeTi[i][(int) (100 * ArrivalRate[i])] > Dtotal) {
+                    OverloadedCloudlets[pointerOver] = i;
+                    pointerOver++;
+                } else {
+                    UnderloadedCloudlets[pointerUnder] = i;
+                    pointerUnder++;
+                }
+            }
+            //System.out.println("PointOver: "+ pointerOver + " PointUnder" + pointerUnder);
+            double art = 0;
+            double sumfi = 0;
+            double sumfj = 0;
+            for (int i = 0; i < pointerOver; i++) {
+                int temp2 = OverloadedCloudlets[i];
+                for (int j = ((int) (100 * ArrivalRate[temp2])); j >100 ; j--) {
+                    art = AverageResponseTimeTi[temp2][j];
+                    if ((art <= Dtotal * (1 + e)) && (art >= Dtotal * (1 - e))) {
+                        fi[i] = +ArrivalRate[temp2] - (double) j / 100;
+                    }
+                    if (((double) j / 100) > (ServiceRate[temp2] * NumberofServers[temp2] - 0.25))
+                        j = 000;
+
+                }
+                int j=(int)( ArrivalRate[temp2]*100);
+                sumfi = sumfi + fi[i];
+            }
+
+            for (int i = 0; i < pointerUnder; i++) {
+
+                int temp1 = UnderloadedCloudlets[i];
+                for (int j = (int) (100 * ArrivalRate[temp1]); j < 32000; j++) {
+                    art = AverageResponseTimeTi[temp1][j];
+                    if ((art <= Dtotal * (1 + e)) && (art>=Dtotal*(1-e))){
+                        //if ((art<=Dtotal+e)&&(art>=Dtotal-e)){
+                        fj[i] = -ArrivalRate[temp1] + (double) j / 100;
+                    }
+                    if (((double) j / 100) > (ServiceRate[temp1] * NumberofServers[temp1] - 0.25))
+                        j = 32000;
+                }
+                sumfj = sumfj + fj[i];
+            }
+            D = sumfi - sumfj;
+            if (D > 0) Tmin = Dtotal;
+            if (D < 0) Tmax = Dtotal;
+            //       Log.printFormatted("\t D : %f  Dtotal %f  Tmin %f Tmax %f  \n",D, Dtotal, Tmin, Tmax);
+            //System.out.println("D: " + Dtotal + " Tmin:  " + Tmin + " Tmax:  " + Tmax);
+            if (Math.abs(Tmin-Tmax)<0.0000001) counterbreak++;
+            if (counterbreak>10) {
+                //System.out.println("\t BREAK ! counterbreak: %d   \n\n" +counterbreak);
+                break;
+            }
+        }
+
+        // find overloaded and underloaded cloudlets
+        int pointerOver = 0;
+        int pointerUnder = 0;
+        counterbreak=0;
+        int notadjust =0;
+        for (int i = 0; i < POI; i++) {
+            if (Ti[i] > Dtotal) {
+                OverloadedCloudlets[pointerOver] = i;
+                pointerOver++;
+            } else {
+                UnderloadedCloudlets[pointerUnder] = i;
+                pointerUnder++;
+            }
+        }
+
+        // +2 for s,t nodes. 0 to all nodes!!
+        double[][] graph = new double[POI + 2][POI + 2];
+        for (int i = 0; i < POI + 2; i++)  // Vs = OverloadedCloudlets.get[i];
+            for (int j = 0; j < POI + 2; j++)
+                graph[i][j] = 0;
+
+        double Daverage = 100000000;
+        while (((Dtotal - Daverage) > u) || (Dtotal - Daverage < -u)) {
+            //         Log.printFormatted("\t PointOver %d  PointUnder %d\n",pointerOver, pointerUnder);
+            for (int i = 0; i < POI ; i++) {
+                lj[i] = 0;
+                li[i] = 0;
+            }
+
+            double art = 0;
+            for (int i = 0; i < pointerOver; i++) { // Vs = OverloadedCloudlets.get[i];
+                int temp2 = OverloadedCloudlets[i];
+                //    for (int j = 100; j < (int) (100 * ArrivalRate[temp2]); j++) {
+                for (int j = (int) (100 * ArrivalRate[temp2]); j > 100 ; j--) {
+                    art = AverageResponseTimeTi[temp2][j];
+                    if ((art <= Dtotal * (1 + e)) && (art >= Dtotal * (1 - e))) {
+                        //if ((art<=Dtotal+e)&&(art>=Dtotal-e)){
+                        fi[i] = +ArrivalRate[temp2] - (double) j / 100;
+                        //        Log.printFormatted("\t Host %d art : %f     Flow Over: %f   \n",temp2, art, fi[i]);
+                    }
+                    if (((double) j / 100) > (ServiceRate[temp2] * NumberofServers[temp2] - 0.25)) j = 0;
+                    if (fi[i] < 0) fi[i] = 0;
+                }
+                graph[0][1+ i] = fi[i];
+            }
+
+            for (int i = 0; i < pointerUnder; i++) {
+                int temp1 = UnderloadedCloudlets[i];
+                for (int j = (int) (100 * ArrivalRate[temp1]); j < 32000; j++) {
+                    art = AverageResponseTimeTi[temp1][j];
+                    if ((art <= Dtotal * (1 + e)) && (art>=Dtotal*(1-e))){
+                        //if ((art<=Dtotal+e)&&(art>=Dtotal-e)){
+                        fj[i] = -ArrivalRate[temp1] + (double) j / 100;
+                        //               Log.printFormatted("\t Host %d art : %f     Flow Under: %f \n",temp1, art, fj[i]);
+                    }
+                    if (((double) j / 100 )> (ServiceRate[temp1] * NumberofServers[temp1] - 0.25))
+                        j = 32000;
+                    if (fj[i] < 0) fj[i] = 0;
+                }
+                graph[POI - pointerUnder + 1 + i][POI + 1] = fj[i];
+            }
+
+            for (int i = 0; i < pointerOver; i++) { // Vs = OverloadedCloudlets.get[i];
+                for (int j = 0; j < pointerUnder; j++) {
+                    int temp1 = UnderloadedCloudlets[j];
+                    int temp2 = OverloadedCloudlets[i];
+                    graph[1 + i][POI - pointerUnder + 1 + j] = Math.min(graph[0][1 + i], graph[POI - pointerUnder + 1 + j][POI + 1]);
+                }
+            }
+            // MIN MAX FLOW WITH (Dtotal,Vs,Vt,e)
+            double[][] skata = new double[POI + 2][POI + 2];
+            skata = MinCostMaxFlow.main(graph,NetDelay,POI+2);
+            //skata = FordFulkerson.main(graph, POI + 2);
+            double[] Dj = new double[POI];
+            double maxDj = -20000;
+            for (int i = 0; i < pointerUnder; i++) {
+                int temp1 = UnderloadedCloudlets[i];
+                lj[i] = ArrivalRate[temp1];
+                double sumFi = 0;
+                double Tnet = 0;
+                for (int k = 0; k < pointerOver; k++) {    // k=1=s korifi mexri pointover dhladi ola ta overloaded gia to sugkekrimeno i = underloaded
+                    sumFi = sumFi + skata[POI - pointerUnder +1+ i][k+1];  // eiserxomeni roh
+                    li[k]=li[k] + skata[POI - pointerUnder +1+ i][k+1] ;
+                    Tnet = Tnet + Math.max(0, skata[k+1][POI - pointerUnder + 1 + i]) * NetDelay[temp1][k];
+                }
+                lj[i] = lj[i] + sumFi;
+                //         Log.printFormatted("\t li: %f  lj : %f  sumFi: %f ArrivalRate: %f      \n",li[0], lj[i], sumFi, ArrivalRate[temp1]);
+                Dj[i] = AverageResponseTimeTi[temp1][(int) (lj[i]*100)] + Tnet;  //htan 10
+                if (Dj[i] > maxDj) maxDj = Dj[i];
+            }
+            Daverage = maxDj;
+            Dtotal = (Dtotal + Daverage) / 2;
+            counterbreak++;
+            if (counterbreak>20) {
+                System.out.println("\t BREAK2 ! counterbreak:" + counterbreak);
+                notadjust=1;
+                break;
+            }
+        }
+        System.out.println(pointerOver);
+        System.out.println(pointerUnder);
+        // overloaded cloudlets apo host 0 mexri pointover
+        // underloaded cloudlets apo host overloaded+1 mexri HOSTS
+        if (notadjust==0) {
+            for (int i = 0; i < pointerOver; i++) {
+                int temp2 = OverloadedCloudlets[i];
+                System.out.println("\t Host :" +temp2 + "  PREVIOUS ArrivalRate: " + ArrivalRate[temp2]);
+                ArrivalRate[temp2] = ArrivalRate[temp2] - li[i];
+                if (ArrivalRate[temp2] < 0.1) ArrivalRate[temp2] = 0.1;
+                System.out.println("\t Host :" +temp2 + "  Next ArrivalRate: " + ArrivalRate[temp2]);
+            }
+            for (int i = 0; i < pointerUnder; i++) {
+                int temp1 = UnderloadedCloudlets[i];
+                System.out.println("\t Host :" +temp1 + "  PREVIOUS ArrivalRate: " + ArrivalRate[temp1]);
+                ArrivalRate[temp1] = lj[i];
+                if (ArrivalRate[temp1] < 0.1) ArrivalRate[temp1] = 0.1;
+                System.out.println("\t Host :" +temp1 + "  Next ArrivalRate: " + ArrivalRate[temp1]);
+            }
+        }
+
+        long endTimee   = System.currentTimeMillis();
+        long totalTimee = endTimee - thisTime;
+        System.out.println("Time for Algorithm in milliseconds: "+ totalTimee+ " for app: " +app);   // in milliseconds
+
+        return ArrivalRate;
+    }
+
+    private ArrayList<Vm>[] spawnStaticVms(ArrayList<int[][]> feasibleFormations, ArrayList<Integer>[] vmPlacement) {
+        ArrayList<Vm>[] vmPool = new ArrayList[2*POI];
+        // Spawn new VMs as instructed
+        System.out.println("\n--------- SPAWNING VMS ---------\n");
+        for (int poi = 0; poi < POI; poi++) {
+            vmPool[9+poi] = new ArrayList<>();
+            ArrayList<Vm> tempVmList = new ArrayList();
+//            System.out.println("POI: " + poi);
+            for (int host = 0; host < vmPlacement[poi].size(); host++) {
+//                System.out.println(" Host: " + host);
+                for (int app = 0; app < APPS; app++) {
+//                    System.out.println("  App: " + app);
+                    for (int vm = 0; vm < feasibleFormations.get(vmPlacement[poi].get(host))[app].length; vm++) {
+                        int vmCores = feasibleFormations.get(vmPlacement[poi].get(host))[app][vm];
+                        int vmFlavor = ArrayUtils.indexOf(VM_PES[app], vmCores);
+//                        System.out.println("Host Type Vm Types for this app: " + Arrays.toString(feasibleFormations.get(vmPlacement[poi].get(host))[app]));
+                        vmList[9+poi][app] = createVms(1, poi+9, app, vmFlavor, host, vm);
+                        tempVmList.addAll(vmList[9+poi][app]);
+                        vmPool[9+poi].addAll(vmList[9+poi][app]);
+                        if (vmList[9+poi][app].size() > maxVmSize) maxVmSize = vmList[9+poi][app].size();
+                    }
+                }
+            }
+            edgeBroker[9+poi].submitVmList(tempVmList);
+            correctlySetVmDescriptions(tempVmList);
+        }
+
+
+        return vmPool;
+    }
+
+
 }
